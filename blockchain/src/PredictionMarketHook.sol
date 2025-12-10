@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {BaseHook} from "v4-periphery/src/base/hooks/BaseHook.sol";
+import {BaseHook} from "v4-periphery/src/utils/BaseHook.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
+import {SwapParams} from "v4-core/types/PoolOperation.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
 import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
@@ -128,20 +129,44 @@ contract PredictionMarketHook is BaseHook {
 
     /**
      * @notice Hook called before pool initialization - sets up prediction market
+     * @param sender The sender of the initialize call
      * @param key The pool key
      * @param sqrtPriceX96 Initial sqrt price
-     * @param hookData Encoded market parameters
+     * @dev Market parameters must be set via initializeMarket() before pool initialization
      */
-    function beforeInitialize(address sender, PoolKey calldata key, uint160 sqrtPriceX96, bytes calldata hookData)
-        external
+    function _beforeInitialize(address sender, PoolKey calldata key, uint160 sqrtPriceX96)
+        internal
         override
-        onlyPoolManager
         returns (bytes4)
     {
-        // Decode market parameters from hookData
-        (bytes32 eventId, uint256 eventTimestamp, address oracleAddress, uint8 numOutcomes) =
-            abi.decode(hookData, (bytes32, uint256, address, uint8));
+        PoolId poolId = key.toId();
+        Market storage market = markets[poolId];
 
+        // Validation - market must be initialized via initializeMarket first
+        if (market.eventTimestamp == 0) revert InvalidMarketParams();
+        if (market.eventTimestamp <= block.timestamp) revert EventInPast();
+        if (market.oracleAddress == address(0)) revert InvalidOracle();
+
+        emit MarketCreated(poolId, market.eventId, market.eventTimestamp, market.oracleAddress, market.numOutcomes);
+
+        return BaseHook.beforeInitialize.selector;
+    }
+
+    /**
+     * @notice Initialize market parameters before pool creation
+     * @param key The pool key
+     * @param eventId Unique identifier for the event
+     * @param eventTimestamp When the event occurs
+     * @param oracleAddress Chainlink oracle address
+     * @param numOutcomes Number of possible outcomes
+     */
+    function initializeMarket(
+        PoolKey calldata key,
+        bytes32 eventId,
+        uint256 eventTimestamp,
+        address oracleAddress,
+        uint8 numOutcomes
+    ) external {
         // Validation
         if (eventTimestamp <= block.timestamp) revert EventInPast();
         if (oracleAddress == address(0)) revert InvalidOracle();
@@ -159,25 +184,22 @@ contract PredictionMarketHook is BaseHook {
             winningOutcome: 0,
             resolutionTime: 0,
             totalVolume: 0,
-            creator: sender
+            creator: msg.sender
         });
-
-        emit MarketCreated(poolId, eventId, eventTimestamp, oracleAddress, numOutcomes);
-
-        return this.beforeInitialize.selector;
     }
 
     /**
      * @notice Hook called before swap - applies time decay and checks market state
+     * @param sender The sender of the swap
      * @param key The pool key
      * @param params Swap parameters
+     * @param hookData Hook data
      */
-    function beforeSwap(
-        address sender,
-        PoolKey calldata key,
-        IPoolManager.SwapParams calldata params,
-        bytes calldata hookData
-    ) external override onlyPoolManager returns (bytes4, BeforeSwapDelta, uint24) {
+    function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
+        internal
+        override
+        returns (bytes4, BeforeSwapDelta, uint24)
+    {
         PoolId poolId = key.toId();
         Market storage market = markets[poolId];
 
@@ -194,22 +216,24 @@ contract PredictionMarketHook is BaseHook {
         uint256 timeToEvent = market.eventTimestamp - block.timestamp;
         uint24 adjustedFee = _calculateTimeDecayFee(timeToEvent, key.fee);
 
-        return (this.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, adjustedFee);
+        return (BaseHook.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, adjustedFee);
     }
 
     /**
      * @notice Hook called after swap - updates probability and volume tracking
+     * @param sender The sender of the swap
      * @param key The pool key
      * @param params Swap parameters
      * @param delta Balance changes from the swap
+     * @param hookData Hook data
      */
-    function afterSwap(
+    function _afterSwap(
         address sender,
         PoolKey calldata key,
-        IPoolManager.SwapParams calldata params,
+        SwapParams calldata params,
         BalanceDelta delta,
         bytes calldata hookData
-    ) external override onlyPoolManager returns (bytes4, int128) {
+    ) internal override returns (bytes4, int128) {
         PoolId poolId = key.toId();
         Market storage market = markets[poolId];
 
@@ -223,7 +247,7 @@ contract PredictionMarketHook is BaseHook {
         // For now, this is a simplified version
         emit ProbabilityUpdated(poolId, 5e17); // Placeholder 50%
 
-        return (this.afterSwap.selector, 0);
+        return (BaseHook.afterSwap.selector, 0);
     }
 
     /*//////////////////////////////////////////////////////////////

@@ -13,10 +13,10 @@ import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {Currency, CurrencyLibrary} from "v4-core/types/Currency.sol";
 import {Hooks} from "v4-core/libraries/Hooks.sol";
 
-import {PredictionMarketHook} from "../src/PredictionMarketHook.sol";
-import {OutcomeToken} from "../src/OutcomeToken.sol";
-import {TokenManager} from "../src/TokenManager.sol";
-import {MockChainlinkOracle} from "../src/mocks/MockChainlinkOracle.sol";
+import {PredictionMarketHook} from "../../src/PredictionMarketHook.sol";
+import {OutcomeToken} from "../../src/OutcomeToken.sol";
+import {TokenManager} from "../../src/TokenManager.sol";
+import {MockChainlinkOracle} from "../../src/mocks/MockChainlinkOracle.sol";
 
 contract PredictionMarketHookTest is Test, Deployers {
     using PoolIdLibrary for PoolKey;
@@ -62,8 +62,8 @@ contract PredictionMarketHookTest is Test, Deployers {
 
         // Create pool key
         poolKey = PoolKey({
-            currency0: Currency.wrap(address(collateralToken)),
-            currency1: Currency.wrap(address(0)), // Native token or another ERC20
+            currency0: Currency.wrap(address(0)), // Native token or another ERC20
+            currency1: Currency.wrap(address(collateralToken)),
             fee: 3000, // 0.3%
             tickSpacing: 60,
             hooks: hook
@@ -71,10 +71,11 @@ contract PredictionMarketHookTest is Test, Deployers {
 
         poolId = poolKey.toId();
 
-        // Initialize the pool with market data
-        bytes memory hookData = abi.encode(EVENT_ID, eventTimestamp, address(oracle), NUM_OUTCOMES);
+        // Initialize market parameters
+        hook.initializeMarket(poolKey, EVENT_ID, eventTimestamp, address(oracle), NUM_OUTCOMES);
 
-        manager.initialize(poolKey, SQRT_PRICE_1_1, hookData);
+        // Initialize the pool
+        manager.initialize(poolKey, SQRT_PRICE_1_1);
 
         // Mint tokens to test users
         collateralToken.mint(alice, 1000e6);
@@ -98,43 +99,27 @@ contract PredictionMarketHookTest is Test, Deployers {
     function test_RevertIf_EventInPast() public {
         uint256 pastTimestamp = block.timestamp - 1 days;
 
-        bytes memory hookData = abi.encode(keccak256("PAST-EVENT"), pastTimestamp, address(oracle), NUM_OUTCOMES);
-
         PoolKey memory invalidKey = poolKey;
         invalidKey.currency1 = Currency.wrap(address(1)); // Different pool
 
         vm.expectRevert(PredictionMarketHook.EventInPast.selector);
-        manager.initialize(invalidKey, SQRT_PRICE_1_1, hookData);
+        hook.initializeMarket(invalidKey, keccak256("PAST-EVENT"), pastTimestamp, address(oracle), NUM_OUTCOMES);
     }
 
     function test_RevertIf_InvalidOracle() public {
-        bytes memory hookData = abi.encode(
-            EVENT_ID,
-            eventTimestamp,
-            address(0), // Invalid oracle
-            NUM_OUTCOMES
-        );
-
         PoolKey memory invalidKey = poolKey;
         invalidKey.currency1 = Currency.wrap(address(2));
 
         vm.expectRevert(PredictionMarketHook.InvalidOracle.selector);
-        manager.initialize(invalidKey, SQRT_PRICE_1_1, hookData);
+        hook.initializeMarket(invalidKey, EVENT_ID, eventTimestamp, address(0), NUM_OUTCOMES);
     }
 
     function test_RevertIf_InvalidOutcomeCount() public {
-        bytes memory hookData = abi.encode(
-            EVENT_ID,
-            eventTimestamp,
-            address(oracle),
-            uint8(1) // Too few outcomes
-        );
-
         PoolKey memory invalidKey = poolKey;
         invalidKey.currency1 = Currency.wrap(address(3));
 
         vm.expectRevert(PredictionMarketHook.InvalidOutcomeCount.selector);
-        manager.initialize(invalidKey, SQRT_PRICE_1_1, hookData);
+        hook.initializeMarket(invalidKey, EVENT_ID, eventTimestamp, address(oracle), uint8(1));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -337,13 +322,16 @@ contract PredictionMarketHookTest is Test, Deployers {
 
         // Create market with this timestamp
         uint256 futureTime = block.timestamp + timeToEvent;
-        bytes memory hookData =
-            abi.encode(keccak256(abi.encodePacked("FUZZ-", timeToEvent)), futureTime, address(oracle), NUM_OUTCOMES);
+        bytes32 fuzzEventId = keccak256(abi.encodePacked("FUZZ-", timeToEvent));
 
         PoolKey memory fuzzKey = poolKey;
         fuzzKey.currency1 = Currency.wrap(address(uint160(timeToEvent + 1000)));
 
-        manager.initialize(fuzzKey, SQRT_PRICE_1_1, hookData);
+        // Initialize market parameters
+        hook.initializeMarket(fuzzKey, fuzzEventId, futureTime, address(oracle), NUM_OUTCOMES);
+
+        // Initialize pool
+        manager.initialize(fuzzKey, SQRT_PRICE_1_1);
         PoolId fuzzPoolId = fuzzKey.toId();
 
         uint256 actual = hook.getCurrentFeeMultiplier(fuzzPoolId);

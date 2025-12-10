@@ -4,8 +4,8 @@ pragma solidity ^0.8.26;
 import {Test} from "forge-std/Test.sol";
 import {MockERC20} from "solmate/src/test/utils/mocks/MockERC20.sol";
 
-import {TokenManager} from "../src/TokenManager.sol";
-import {OutcomeToken} from "../src/OutcomeToken.sol";
+import {TokenManager} from "../../src/TokenManager.sol";
+import {OutcomeToken} from "../../src/OutcomeToken.sol";
 
 contract TokenManagerTest is Test {
     TokenManager tokenManager;

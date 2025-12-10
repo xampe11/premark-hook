@@ -89,8 +89,7 @@ contract CreateMarket is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
-        // Encode market parameters
-        bytes memory hookData = abi.encode(eventId, eventTimestamp, oracleAddress, numOutcomes);
+        PredictionMarketHook hook = PredictionMarketHook(hookAddress);
 
         // Create pool key
         PoolKey memory key = PoolKey({
@@ -98,16 +97,14 @@ contract CreateMarket is Script {
             currency1: Currency.wrap(address(0)), // Or another token
             fee: 3000, // 0.3%
             tickSpacing: 60,
-            hooks: PredictionMarketHook(hookAddress)
+            hooks: hook
         });
 
+        // Initialize market parameters
+        hook.initializeMarket(key, eventId, eventTimestamp, oracleAddress, numOutcomes);
+
         // Initialize pool (this creates the market)
-        IPoolManager(poolManager)
-            .initialize(
-                key,
-                79228162514264337593543950336, // SQRT_PRICE_1_1
-                hookData
-            );
+        IPoolManager(poolManager).initialize(key, 79228162514264337593543950336); // SQRT_PRICE_1_1
 
         vm.stopBroadcast();
 

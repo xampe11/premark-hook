@@ -21,7 +21,24 @@ git clone <your-repo>
 cd prediction-market-hook
 
 # 2. Install dependencies
-forge install
+
+# OpenZeppelin contracts (for ERC20, Ownable, SafeERC20)
+forge install OpenZeppelin/openzeppelin-contracts
+
+# Chainlink contracts (for oracle interfaces)
+forge install smartcontractkit/chainlink
+
+# Solmate (for gas-optimized contracts)
+forge install transmissions11/solmate
+
+# Forge-std (for testing utilities)
+forge install foundry-rs/forge-std
+
+# Install Uniswap V4 Core
+forge install Uniswap/v4-core
+
+# Install Uniswap V4 Periphery
+forge install Uniswap/v4-periphery
 
 # 3. Copy environment template
 cp .env.example .env

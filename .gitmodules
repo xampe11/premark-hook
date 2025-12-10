@@ -1,0 +1,21 @@
+[submodule "blockchain/lib/openzeppelin-contracts"]
+	path = blockchain/lib/openzeppelin-contracts
+	url = https://github.com/OpenZeppelin/openzeppelin-contracts
+[submodule "blockchain/lib/chainlink"]
+	path = blockchain/lib/chainlink
+	url = https://github.com/smartcontractkit/chainlink
+[submodule "blockchain/lib/solmate"]
+	path = blockchain/lib/solmate
+	url = https://github.com/transmissions11/solmate
+[submodule "blockchain/lib/v4-core"]
+	path = blockchain/lib/v4-core
+	url = https://github.com/Uniswap/v4-core
+[submodule "blockchain/lib/v4-periphery"]
+	path = blockchain/lib/v4-periphery
+	url = https://github.com/Uniswap/v4-periphery
+[submodule "lib/forge-std"]
+	path = lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
+[submodule "blockchain/lib/chainlink-brownie-contracts"]
+	path = blockchain/lib/chainlink-brownie-contracts
+	url = https://github.com/smartcontractkit/chainlink-brownie-contracts
