@@ -35,6 +35,18 @@ contract MockChainlinkOracle is AggregatorV3Interface {
     }
 
     /**
+     * @notice Set the result for the latest round with custom timestamp
+     * @param _answer The outcome (0 for NO, 1 for YES in binary markets)
+     * @param _updatedAt Custom timestamp for when the data was updated
+     */
+    function setLatestAnswerWithTimestamp(int256 _answer, uint256 _updatedAt) external {
+        latestRound++;
+        rounds[latestRound] = RoundData({
+            answer: _answer, startedAt: _updatedAt, updatedAt: _updatedAt, answeredInRound: latestRound
+        });
+    }
+
+    /**
      * @notice Get data about the latest round
      */
     function latestRoundData()

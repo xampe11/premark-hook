@@ -269,7 +269,7 @@ contract PredictionMarketHook is BaseHook {
         (, int256 answer,, uint256 updatedAt,) = oracle.latestRoundData();
 
         // Validate oracle response
-        require(updatedAt > market.eventTimestamp, "Stale oracle data");
+        require(updatedAt >= market.eventTimestamp, "Stale oracle data");
         require(answer >= 0 && answer < int256(uint256(market.numOutcomes)), "Invalid outcome");
 
         // Resolve market
@@ -391,7 +391,9 @@ contract PredictionMarketHook is BaseHook {
      */
     function getCurrentFeeMultiplier(PoolId poolId) external view returns (uint256) {
         Market storage market = markets[poolId];
-        if (market.isResolved || block.timestamp >= market.eventTimestamp) {
+
+        // Return 0 if market doesn't exist, is resolved, or event has passed
+        if (market.eventTimestamp == 0 || market.isResolved || block.timestamp >= market.eventTimestamp) {
             return 0; // No trading
         }
 

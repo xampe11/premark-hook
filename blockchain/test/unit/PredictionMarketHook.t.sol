@@ -97,6 +97,8 @@ contract PredictionMarketHookTest is Test, Deployers {
     }
 
     function test_RevertIf_EventInPast() public {
+        // Warp to a time in the future first to avoid underflow
+        vm.warp(30 days);
         uint256 pastTimestamp = block.timestamp - 1 days;
 
         PoolKey memory invalidKey = poolKey;
@@ -181,11 +183,11 @@ contract PredictionMarketHookTest is Test, Deployers {
     //////////////////////////////////////////////////////////////*/
 
     function test_ResolveMarket_Success() public {
-        // Set oracle result: YES wins (outcome 1)
-        oracle.setLatestAnswer(1);
-
         // Warp past event time
         vm.warp(eventTimestamp + 1);
+
+        // Set oracle result: YES wins (outcome 1) with timestamp after event
+        oracle.setLatestAnswerWithTimestamp(1, eventTimestamp + 1);
 
         // Resolve market
         hook.resolveMarket(poolId);
@@ -202,8 +204,8 @@ contract PredictionMarketHookTest is Test, Deployers {
     }
 
     function test_RevertIf_ResolveTwice() public {
-        oracle.setLatestAnswer(1);
         vm.warp(eventTimestamp + 1);
+        oracle.setLatestAnswerWithTimestamp(1, eventTimestamp + 1);
 
         hook.resolveMarket(poolId);
 
@@ -216,9 +218,9 @@ contract PredictionMarketHookTest is Test, Deployers {
     //////////////////////////////////////////////////////////////*/
 
     function test_RedeemWinningTokens() public {
-        // Resolve market
-        oracle.setLatestAnswer(1);
+        // Warp past event time and resolve market
         vm.warp(eventTimestamp + 1);
+        oracle.setLatestAnswerWithTimestamp(1, eventTimestamp + 1);
         hook.resolveMarket(poolId);
 
         // Wait for dispute period
@@ -239,8 +241,8 @@ contract PredictionMarketHookTest is Test, Deployers {
     }
 
     function test_RevertIf_RedeemDuringDispute() public {
-        oracle.setLatestAnswer(1);
         vm.warp(eventTimestamp + 1);
+        oracle.setLatestAnswerWithTimestamp(1, eventTimestamp + 1);
         hook.resolveMarket(poolId);
 
         // Try to redeem during dispute period
@@ -290,7 +292,7 @@ contract PredictionMarketHookTest is Test, Deployers {
         assertFalse(hook.isTradeable(poolId));
 
         // 4. Oracle reports result
-        oracle.setLatestAnswer(1); // YES wins
+        oracle.setLatestAnswerWithTimestamp(1, eventTimestamp + 1); // YES wins
 
         // 5. Market resolves
         hook.resolveMarket(poolId);
@@ -310,8 +312,8 @@ contract PredictionMarketHookTest is Test, Deployers {
     //////////////////////////////////////////////////////////////*/
 
     function testFuzz_TimeDecayFee(uint256 timeToEvent) public {
-        // Bound time to reasonable range
-        timeToEvent = bound(timeToEvent, 0, 365 days);
+        // Bound time to reasonable range (start from 1 to avoid EventInPast)
+        timeToEvent = bound(timeToEvent, 1, 365 days);
 
         // Calculate expected multiplier
         uint256 expected;
