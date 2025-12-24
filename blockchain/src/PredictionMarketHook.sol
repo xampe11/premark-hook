@@ -129,12 +129,12 @@ contract PredictionMarketHook is BaseHook {
 
     /**
      * @notice Hook called before pool initialization - sets up prediction market
-     * @param sender The sender of the initialize call
+     * @dev sender The sender of the initialize call
      * @param key The pool key
-     * @param sqrtPriceX96 Initial sqrt price
+     * @dev sqrtPriceX96 Initial sqrt price
      * @dev Market parameters must be set via initializeMarket() before pool initialization
      */
-    function _beforeInitialize(address sender, PoolKey calldata key, uint160 sqrtPriceX96)
+    function _beforeInitialize(address /* sender */ ,PoolKey calldata key, uint160 /* sqrtPriceX96 */)
         internal
         override
         returns (bytes4)
@@ -190,12 +190,12 @@ contract PredictionMarketHook is BaseHook {
 
     /**
      * @notice Hook called before swap - applies time decay and checks market state
-     * @param sender The sender of the swap
+     * @dev sender The sender of the swap
      * @param key The pool key
-     * @param params Swap parameters
-     * @param hookData Hook data
+     * @dev params Swap parameters
+     * @dev hookData Hook data
      */
-    function _beforeSwap(address sender, PoolKey calldata key, SwapParams calldata params, bytes calldata hookData)
+    function _beforeSwap(address /* sender */, PoolKey calldata key, SwapParams calldata /* params */, bytes calldata /* hookData */)
         internal
         override
         returns (bytes4, BeforeSwapDelta, uint24)
@@ -221,18 +221,18 @@ contract PredictionMarketHook is BaseHook {
 
     /**
      * @notice Hook called after swap - updates probability and volume tracking
-     * @param sender The sender of the swap
+     * @dev sender The sender of the swap
      * @param key The pool key
      * @param params Swap parameters
-     * @param delta Balance changes from the swap
-     * @param hookData Hook data
+     * @dev delta Balance changes from the swap
+     * @dev hookData Hook data
      */
     function _afterSwap(
-        address sender,
+        address /* sender */,
         PoolKey calldata key,
         SwapParams calldata params,
-        BalanceDelta delta,
-        bytes calldata hookData
+        BalanceDelta /* delta */,
+        bytes calldata /* hookData */
     ) internal override returns (bytes4, int128) {
         PoolId poolId = key.toId();
         Market storage market = markets[poolId];
