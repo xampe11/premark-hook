@@ -38,9 +38,10 @@ contract CreateMarket is Script {
         PredictionMarketHook hook = PredictionMarketHook(hookAddress);
 
         // Create pool key
+        // Note: currency0 must be < currency1 (addresses compared as uint160)
         PoolKey memory key = PoolKey({
-            currency0: Currency.wrap(collateralToken),
-            currency1: Currency.wrap(address(0)), // Or another token
+            currency0: Currency.wrap(address(0)), // Native currency (ETH)
+            currency1: Currency.wrap(collateralToken),
             fee: 3000, // 0.3%
             tickSpacing: 60,
             hooks: hook
