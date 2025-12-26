@@ -18,18 +18,18 @@ import {OutcomeToken} from "../src/OutcomeToken.sol";
  * @notice Deploys the full prediction market infrastructure
  */
 contract DeployPredictionMarket is Script {
-    // Addresses (update for your network)
-    address constant POOL_MANAGER = address(0); // UPDATE: v4 PoolManager address
-    address constant COLLATERAL_TOKEN = address(0); // UPDATE: USDC or other stablecoin
-
     // CREATE2 Deployer Proxy for deterministic deployment
     address constant CREATE2_DEPLOYER = 0x4e59b44847b379578588920cA78FbF26c0B4956C;
 
     function run() external {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(deployerPrivateKey);
+        address poolManager = vm.envAddress("POOL_MANAGER");
+        address collateralToken = vm.envAddress("COLLATERAL_TOKEN");
 
         console2.log("Deployer:", deployer);
+        console2.log("Pool Manager:", poolManager);
+        console2.log("Collateral Token:", collateralToken);
         console2.log("Deploying Prediction Market Hook...");
 
         // Calculate required flags for hook permissions
@@ -41,7 +41,7 @@ contract DeployPredictionMarket is Script {
 
         // Mine for salt to get correct hook address
         bytes memory creationCode = type(PredictionMarketHook).creationCode;
-        bytes memory constructorArgs = abi.encode(IPoolManager(POOL_MANAGER));
+        bytes memory constructorArgs = abi.encode(IPoolManager(poolManager));
 
         console2.log("Mining for hook address with correct flags...");
         (address hookAddress, bytes32 salt) = HookMiner.find(
@@ -57,7 +57,7 @@ contract DeployPredictionMarket is Script {
         vm.startBroadcast(deployerPrivateKey);
 
         // Deploy PredictionMarketHook using CREATE2 with the mined salt
-        PredictionMarketHook hook = new PredictionMarketHook{salt: salt}(IPoolManager(POOL_MANAGER));
+        PredictionMarketHook hook = new PredictionMarketHook{salt: salt}(IPoolManager(poolManager));
         require(address(hook) == hookAddress, "Hook address mismatch");
         console2.log("Hook deployed at:", address(hook));
 
