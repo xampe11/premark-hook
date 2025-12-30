@@ -195,9 +195,9 @@ contract TokenManagerTest is Test {
         vm.prank(hook);
         tokenManager.resolveMarket(MARKET_ID, 1);
 
-        // Redeem winning tokens
+        // Redeem winning tokens (no fee for this test)
         vm.prank(alice);
-        tokenManager.redeemWinning(MARKET_ID, amount);
+        tokenManager.redeemWinning(MARKET_ID, alice, amount, address(0), 0);
 
         // Alice should have her collateral back
         assertEq(collateral.balanceOf(alice), 1000e6);
@@ -214,7 +214,7 @@ contract TokenManagerTest is Test {
         tokenManager.mintSet(MARKET_ID, amount);
 
         vm.expectRevert(TokenManager.MarketResolved.selector);
-        tokenManager.redeemWinning(MARKET_ID, amount);
+        tokenManager.redeemWinning(MARKET_ID, alice, amount, address(0), 0);
         vm.stopPrank();
     }
 

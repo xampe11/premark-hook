@@ -219,6 +219,15 @@ contract PredictionMarketHookTest is Test, Deployers {
     //////////////////////////////////////////////////////////////*/
 
     function test_RedeemWinningTokens() public {
+        // Alice mints a complete set first
+        uint256 amount = 100e6;
+        vm.startPrank(alice);
+        collateralToken.approve(address(tokenManager), amount);
+
+        PredictionMarketHook.Market memory market = hook.getMarket(poolId);
+        tokenManager.mintSet(market.eventId, amount);
+        vm.stopPrank();
+
         // Warp past event time and resolve market
         vm.warp(eventTimestamp + 1);
         oracle.setLatestAnswerWithTimestamp(1, eventTimestamp + 1);
@@ -227,10 +236,16 @@ contract PredictionMarketHookTest is Test, Deployers {
         // Wait for dispute period
         vm.warp(eventTimestamp + 1 + 72 hours);
 
-        // Redeem tokens (Note: requires full token manager integration)
-        uint256 amount = 100e6;
+        // Check Alice's collateral before redemption
+        uint256 collateralBefore = collateralToken.balanceOf(alice);
+
+        // Redeem winning tokens (YES won, so redeem YES tokens)
         vm.prank(alice);
         hook.redeemWinningTokens(poolId, amount);
+
+        // After redemption with 2% fee, Alice should get 98e6 back
+        uint256 expectedPayout = amount - (amount * 2 / 100); // 98e6
+        assertEq(collateralToken.balanceOf(alice), collateralBefore + expectedPayout);
     }
 
     function test_RevertIf_RedeemBeforeResolution() public {

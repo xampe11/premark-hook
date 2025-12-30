@@ -56,6 +56,8 @@ contract PredictionMarketHook is BaseHook {
 
     event DisputeInitiated(PoolId indexed poolId, address indexed disputer, uint8 challengedOutcome);
 
+    event FeesWithdrawn(address indexed token, address indexed recipient, uint256 amount);
+
     /*//////////////////////////////////////////////////////////////
                                  STRUCTS
     //////////////////////////////////////////////////////////////*/
@@ -98,6 +100,15 @@ contract PredictionMarketHook is BaseHook {
 
     /// @notice TokenManager contract address
     address public immutable tokenManager;
+
+    /// @notice Protocol fees collected (in collateral tokens)
+    /// @dev Maps collateral token address => accumulated fees
+    mapping(address => uint256) public protocolFees;
+
+    /// @notice Simplified probability tracking (basis points, 10000 = 100%)
+    /// @dev Maps poolId => estimated probability of outcome 1 (YES in binary markets)
+    /// @dev TODO: Replace with real-time calculation from pool reserves once architecture is finalized
+    mapping(PoolId => uint256) public estimatedProbability;
 
     /*//////////////////////////////////////////////////////////////
                                CONSTRUCTOR
@@ -153,6 +164,9 @@ contract PredictionMarketHook is BaseHook {
         if (market.eventTimestamp == 0) revert InvalidMarketParams();
         if (market.eventTimestamp <= block.timestamp) revert EventInPast();
         if (market.oracleAddress == address(0)) revert InvalidOracle();
+
+        // Initialize probability to 50% (5000 basis points)
+        estimatedProbability[poolId] = 5000;
 
         emit MarketCreated(poolId, market.eventId, market.eventTimestamp, market.oracleAddress, market.numOutcomes);
 
@@ -241,7 +255,7 @@ contract PredictionMarketHook is BaseHook {
         address /* sender */,
         PoolKey calldata key,
         SwapParams calldata params,
-        BalanceDelta /* delta */,
+        BalanceDelta delta,
         bytes calldata /* hookData */
     ) internal override returns (bytes4, int128) {
         PoolId poolId = key.toId();
@@ -252,10 +266,25 @@ contract PredictionMarketHook is BaseHook {
             params.amountSpecified > 0 ? uint256(params.amountSpecified) : uint256(-params.amountSpecified);
         market.totalVolume += swapAmount;
 
-        // Calculate and emit new probability
-        // Note: In production, you'd get reserves from pool manager
-        // For now, this is a simplified version
-        emit ProbabilityUpdated(poolId, 5e17); // Placeholder 50%
+        // Update estimated probability based on swap direction
+        // Simplified heuristic: larger swaps in one direction indicate higher demand
+        // TODO: Replace with actual pool reserve calculation when architecture is finalized
+        int256 amount0 = delta.amount0();
+        int256 amount1 = delta.amount1();
+
+        // Adjust probability based on swap direction (simplified)
+        uint256 currentProb = estimatedProbability[poolId];
+        if (amount0 > 0 && amount1 < 0) {
+            // Buying currency0 (YES?) - increase probability
+            currentProb = _min(currentProb + 50, 9500); // Cap at 95%
+        } else if (amount0 < 0 && amount1 > 0) {
+            // Selling currency0 (YES?) - decrease probability
+            currentProb = _max(currentProb - 50, 500); // Floor at 5%
+        }
+        estimatedProbability[poolId] = currentProb;
+
+        // Emit updated probability (convert basis points to 1e18)
+        emit ProbabilityUpdated(poolId, (currentProb * 1e18) / 10000);
 
         return (BaseHook.afterSwap.selector, 0);
     }
@@ -286,6 +315,9 @@ contract PredictionMarketHook is BaseHook {
         market.isResolved = true;
         market.winningOutcome = uint8(uint256(answer));
         market.resolutionTime = block.timestamp;
+
+        // Notify TokenManager of resolution
+        TokenManager(tokenManager).resolveMarket(market.eventId, market.winningOutcome);
 
         emit MarketResolved(poolId, market.winningOutcome, block.timestamp);
     }
@@ -325,10 +357,21 @@ contract PredictionMarketHook is BaseHook {
             revert DisputePeriodActive();
         }
 
-        // In production, you would:
-        // 1. Burn winning outcome tokens from msg.sender
-        // 2. Transfer collateral 1:1 to msg.sender
-        // 3. Collect resolution fee
+        // Get collateral token address from TokenManager
+        address collateralToken = TokenManager(tokenManager).getCollateralToken(market.eventId);
+
+        // Calculate resolution fee (2% = 200 basis points)
+        uint256 feeAmount = (amount * RESOLUTION_FEE_PERCENT) / 100;
+
+        // Call TokenManager to redeem winning tokens
+        // TokenManager will:
+        // 1. Burn winning outcome tokens from user
+        // 2. Transfer fee to this contract (the Hook)
+        // 3. Transfer remaining collateral to user
+        TokenManager(tokenManager).redeemWinning(market.eventId, msg.sender, amount, address(this), RESOLUTION_FEE_PERCENT * 100); // Convert to basis points
+
+        // Track protocol fees
+        protocolFees[collateralToken] += feeAmount;
 
         emit TokensRedeemed(msg.sender, poolId, amount);
     }
@@ -363,6 +406,20 @@ contract PredictionMarketHook is BaseHook {
     /*//////////////////////////////////////////////////////////////
                         INTERNAL FUNCTIONS
     //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Return minimum of two values
+     */
+    function _min(uint256 a, uint256 b) internal pure returns (uint256) {
+        return a < b ? a : b;
+    }
+
+    /**
+     * @notice Return maximum of two values
+     */
+    function _max(uint256 a, uint256 b) internal pure returns (uint256) {
+        return a > b ? a : b;
+    }
 
     /**
      * @notice Create outcome tokens and register market with TokenManager
@@ -481,6 +538,27 @@ contract PredictionMarketHook is BaseHook {
     }
 
     /*//////////////////////////////////////////////////////////////
+                            ADMIN FUNCTIONS
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Withdraw accumulated protocol fees
+     * @param token Collateral token address
+     * @param recipient Address to receive the fees
+     * @param amount Amount of fees to withdraw
+     */
+    function withdrawFees(address token, address recipient, uint256 amount) external {
+        // Note: In production, add access control (onlyOwner or similar)
+        require(amount <= protocolFees[token], "Insufficient fees");
+        require(recipient != address(0), "Invalid recipient");
+
+        protocolFees[token] -= amount;
+        IERC20(token).transfer(recipient, amount);
+
+        emit FeesWithdrawn(token, recipient, amount);
+    }
+
+    /*//////////////////////////////////////////////////////////////
                             VIEW FUNCTIONS
     //////////////////////////////////////////////////////////////*/
 
@@ -533,5 +611,17 @@ contract PredictionMarketHook is BaseHook {
         if (timeToEvent < 1 days) return 200; // 2x
         if (timeToEvent < 7 days) return 150; // 1.5x
         return 100; // 1x
+    }
+
+    /**
+     * @notice Get current estimated probability for the market
+     * @param poolId The pool ID
+     * @return probability Estimated probability in 1e18 format (1e18 = 100%)
+     * @dev This is a simplified estimation based on swap activity
+     * @dev TODO: Replace with actual calculation from pool reserves once proper architecture is implemented
+     */
+    function getCurrentProbability(PoolId poolId) external view returns (uint256) {
+        // Convert from basis points to 1e18 format
+        return (estimatedProbability[poolId] * 1e18) / 10000;
     }
 }

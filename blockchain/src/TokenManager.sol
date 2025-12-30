@@ -147,9 +147,16 @@ contract TokenManager {
     /**
      * @notice Redeem winning outcome tokens after market resolution
      * @param marketId Market identifier
+     * @param user Address of user redeeming tokens
      * @param amount Amount of winning tokens to redeem
+     * @param feeRecipient Address to receive resolution fee (address(0) for no fee)
+     * @param feePercent Fee percentage in basis points (e.g., 200 = 2%)
+     * @return payout Amount of collateral transferred to user (after fee)
      */
-    function redeemWinning(bytes32 marketId, uint256 amount) external {
+    function redeemWinning(bytes32 marketId, address user, uint256 amount, address feeRecipient, uint256 feePercent)
+        external
+        returns (uint256 payout)
+    {
         if (amount == 0) revert InvalidAmount();
 
         MarketTokens storage market = markets[marketId];
@@ -157,15 +164,29 @@ contract TokenManager {
 
         OutcomeToken winningToken = market.outcomes[market.winningOutcome];
 
-        if (winningToken.balanceOf(msg.sender) < amount) {
+        if (winningToken.balanceOf(user) < amount) {
             revert InsufficientBalance();
         }
 
-        // Burn winning tokens
-        winningToken.burn(msg.sender, amount);
+        // Burn winning tokens from user
+        winningToken.burn(user, amount);
 
-        // Transfer collateral 1:1
-        market.collateral.safeTransfer(msg.sender, amount);
+        // Calculate fee and payout
+        uint256 fee = 0;
+        if (feeRecipient != address(0) && feePercent > 0) {
+            fee = (amount * feePercent) / 10000; // feePercent in basis points
+            payout = amount - fee;
+
+            // Transfer fee to recipient
+            if (fee > 0) {
+                market.collateral.safeTransfer(feeRecipient, fee);
+            }
+        } else {
+            payout = amount;
+        }
+
+        // Transfer remaining collateral to user
+        market.collateral.safeTransfer(user, payout);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -226,5 +247,14 @@ contract TokenManager {
         if (amount == type(uint256).max) {
             amount = 0;
         }
+    }
+
+    /**
+     * @notice Get collateral token address for a market
+     * @param marketId Market identifier
+     * @return Collateral token address
+     */
+    function getCollateralToken(bytes32 marketId) external view returns (address) {
+        return address(markets[marketId].collateral);
     }
 }
