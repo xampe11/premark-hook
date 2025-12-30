@@ -13,6 +13,8 @@ import {Currency} from "v4-core/types/Currency.sol";
 import {CurrencySettler} from "v4-periphery/lib/v4-core/test/utils/CurrencySettler.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {TokenManager} from "./TokenManager.sol";
+import {OutcomeToken as OutcomeTokenContract} from "./OutcomeToken.sol";
 
 /**
  * @title PredictionMarketHook
@@ -94,11 +96,16 @@ contract PredictionMarketHook is BaseHook {
     /// @notice Resolution fee (2% of losing side)
     uint256 public constant RESOLUTION_FEE_PERCENT = 2;
 
+    /// @notice TokenManager contract address
+    address public immutable tokenManager;
+
     /*//////////////////////////////////////////////////////////////
                                CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
-    constructor(IPoolManager _poolManager) BaseHook(_poolManager) {}
+    constructor(IPoolManager _poolManager, address _tokenManager) BaseHook(_poolManager) {
+        tokenManager = _tokenManager;
+    }
 
     /*//////////////////////////////////////////////////////////////
                             HOOK PERMISSIONS
@@ -186,6 +193,9 @@ contract PredictionMarketHook is BaseHook {
             totalVolume: 0,
             creator: msg.sender
         });
+
+        // Create outcome tokens and register with TokenManager
+        _createOutcomeTokens(poolId, key, eventId, eventTimestamp, numOutcomes);
     }
 
     /**
@@ -348,6 +358,126 @@ contract PredictionMarketHook is BaseHook {
         }
 
         return baseFee;
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                        INTERNAL FUNCTIONS
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Create outcome tokens and register market with TokenManager
+     * @param poolId The pool ID
+     * @param key The pool key containing currency information
+     * @param eventId Unique market identifier
+     * @param eventTimestamp When the event occurs
+     * @param numOutcomes Number of outcomes
+     */
+    function _createOutcomeTokens(
+        PoolId poolId,
+        PoolKey calldata key,
+        bytes32 eventId,
+        uint256 eventTimestamp,
+        uint8 numOutcomes
+    ) internal {
+        // Determine collateral token (currency1 in the pool)
+        address collateralToken = Currency.unwrap(key.currency1);
+
+        // Create array to store outcome token addresses
+        address[] memory outcomeAddresses = new address[](numOutcomes);
+
+        // Create outcome tokens
+        for (uint8 i = 0; i < numOutcomes; i++) {
+            // Generate token name and symbol based on outcome index
+            string memory name = _generateTokenName(eventId, i, numOutcomes);
+            string memory symbol = _generateTokenSymbol(i, numOutcomes);
+
+            // Deploy new outcome token (TokenManager is the owner)
+            OutcomeTokenContract token = new OutcomeTokenContract(
+                name,
+                symbol,
+                eventId,
+                i,
+                eventTimestamp,
+                tokenManager
+            );
+
+            // Store token reference
+            outcomeTokens[poolId].push(OutcomeToken({
+                tokenAddress: address(token),
+                totalSupply: 0
+            }));
+
+            outcomeAddresses[i] = address(token);
+        }
+
+        // Register market with TokenManager
+        TokenManager(tokenManager).registerMarket(eventId, outcomeAddresses, collateralToken);
+    }
+
+    /**
+     * @notice Generate token name based on market ID and outcome
+     * @param eventId Market identifier
+     * @param outcomeIndex Outcome index
+     * @param numOutcomes Total number of outcomes
+     * @return Token name
+     */
+    function _generateTokenName(bytes32 eventId, uint8 outcomeIndex, uint8 numOutcomes)
+        internal
+        pure
+        returns (string memory)
+    {
+        if (numOutcomes == 2) {
+            // Binary market: YES/NO
+            return outcomeIndex == 1 ? "Outcome YES" : "Outcome NO";
+        } else {
+            // Multi-outcome market: OUTCOME-0, OUTCOME-1, etc.
+            return string(abi.encodePacked("Outcome ", _uint2str(outcomeIndex)));
+        }
+    }
+
+    /**
+     * @notice Generate token symbol based on outcome
+     * @param outcomeIndex Outcome index
+     * @param numOutcomes Total number of outcomes
+     * @return Token symbol
+     */
+    function _generateTokenSymbol(uint8 outcomeIndex, uint8 numOutcomes)
+        internal
+        pure
+        returns (string memory)
+    {
+        if (numOutcomes == 2) {
+            return outcomeIndex == 1 ? "YES" : "NO";
+        } else {
+            return string(abi.encodePacked("OUT", _uint2str(outcomeIndex)));
+        }
+    }
+
+    /**
+     * @notice Convert uint to string
+     * @param _i Number to convert
+     * @return String representation
+     */
+    function _uint2str(uint256 _i) internal pure returns (string memory) {
+        if (_i == 0) {
+            return "0";
+        }
+        uint256 j = _i;
+        uint256 len;
+        while (j != 0) {
+            len++;
+            j /= 10;
+        }
+        bytes memory bstr = new bytes(len);
+        uint256 k = len;
+        while (_i != 0) {
+            k = k - 1;
+            uint8 temp = (48 + uint8(_i - _i / 10 * 10));
+            bytes1 b1 = bytes1(temp);
+            bstr[k] = b1;
+            _i /= 10;
+        }
+        return string(bstr);
     }
 
     /*//////////////////////////////////////////////////////////////

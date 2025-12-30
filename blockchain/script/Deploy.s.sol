@@ -39,9 +39,13 @@ contract DeployPredictionMarket is Script {
             Hooks.AFTER_SWAP_FLAG
         );
 
-        // Mine for salt to get correct hook address
+        // Predict TokenManager address (deployed after Hook address is computed)
+        address predictedTokenManager = vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1);
+        console2.log("Predicted TokenManager address:", predictedTokenManager);
+
+        // Mine for salt to get correct hook address (with TokenManager in constructor)
         bytes memory creationCode = type(PredictionMarketHook).creationCode;
-        bytes memory constructorArgs = abi.encode(IPoolManager(poolManager));
+        bytes memory constructorArgs = abi.encode(IPoolManager(poolManager), predictedTokenManager);
 
         console2.log("Mining for hook address with correct flags...");
         (address hookAddress, bytes32 salt) = HookMiner.find(
@@ -56,14 +60,17 @@ contract DeployPredictionMarket is Script {
 
         vm.startBroadcast(deployerPrivateKey);
 
+        // Deploy TokenManager FIRST (with predicted Hook address)
+        TokenManager tokenManager = new TokenManager(hookAddress);
+        console2.log("TokenManager deployed at:", address(tokenManager));
+
+        // Verify prediction was correct
+        require(address(tokenManager) == predictedTokenManager, "TokenManager address prediction failed");
+
         // Deploy PredictionMarketHook using CREATE2 with the mined salt
-        PredictionMarketHook hook = new PredictionMarketHook{salt: salt}(IPoolManager(poolManager));
+        PredictionMarketHook hook = new PredictionMarketHook{salt: salt}(IPoolManager(poolManager), address(tokenManager));
         require(address(hook) == hookAddress, "Hook address mismatch");
         console2.log("Hook deployed at:", address(hook));
-
-        // 2. Deploy TokenManager
-        TokenManager tokenManager = new TokenManager(address(hook));
-        console2.log("TokenManager deployed at:", address(tokenManager));
 
         vm.stopBroadcast();
 

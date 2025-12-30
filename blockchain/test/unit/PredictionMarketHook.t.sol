@@ -54,11 +54,12 @@ contract PredictionMarketHookTest is Test, Deployers {
         address hookAddress =
             address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG));
 
-        deployCodeTo("PredictionMarketHook.sol", abi.encode(manager), hookAddress);
-        hook = PredictionMarketHook(hookAddress);
+        // Deploy token manager first (needs hook address)
+        tokenManager = new TokenManager(hookAddress);
 
-        // Deploy token manager
-        tokenManager = new TokenManager(address(hook));
+        // Deploy hook with manager and tokenManager addresses
+        deployCodeTo("PredictionMarketHook.sol", abi.encode(manager, address(tokenManager)), hookAddress);
+        hook = PredictionMarketHook(hookAddress);
 
         // Create pool key
         poolKey = PoolKey({

@@ -11,6 +11,7 @@ import {HookMiner} from "v4-periphery/src/utils/HookMiner.sol";
 import {PredictionMarketHook} from "../src/PredictionMarketHook.sol";
 import {TokenManager} from "../src/TokenManager.sol";
 import {MockChainlinkOracle} from "../src/mocks/MockChainlinkOracle.sol";
+import {MockUSDC} from "../src/mocks/MockUSDC.sol";
 
 /**
  * @title DeployTestnet
@@ -35,7 +36,10 @@ contract DeployTestnet is Script {
 
         // Read from environment variables
         address poolManager = vm.envAddress("POOL_MANAGER");
-        address collateralToken = vm.envAddress("COLLATERAL_TOKEN");
+
+        // Check if we should deploy our own collateral token or use existing
+        address collateralToken;
+        bool deployCollateral = vm.envOr("DEPLOY_COLLATERAL", true);
 
         console2.log("=================================================");
         console2.log("TESTNET DEPLOYMENT");
@@ -44,7 +48,7 @@ contract DeployTestnet is Script {
         console2.log("Chain ID:", block.chainid);
         console2.log("Network:", getChainName());
         console2.log("Pool Manager:", poolManager);
-        console2.log("Collateral Token:", collateralToken);
+        console2.log("Deploy Collateral:", deployCollateral);
         console2.log("=================================================");
 
         // Calculate required flags for hook permissions
@@ -54,9 +58,25 @@ contract DeployTestnet is Script {
             Hooks.AFTER_SWAP_FLAG
         );
 
-        // Mine for salt to get correct hook address
+        // We need to pre-compute the hook address because of circular dependency:
+        // - Hook needs TokenManager address in constructor
+        // - TokenManager needs Hook address in constructor
+        // Solution: Deploy TokenManager with predicted Hook address, then deploy Hook
+
+        // Calculate how many contracts will be deployed before TokenManager
+        // 1. MockUSDC (if deployCollateral) or nothing
+        // 2. MockChainlinkOracle
+        // 3. TokenManager <- this is what we want to predict
+        uint256 currentNonce = vm.getNonce(deployer);
+        uint256 nonceOffset = deployCollateral ? 2 : 1; // +1 for oracle, +1 for USDC if deploying
+        address predictedTokenManager = vm.computeCreateAddress(deployer, currentNonce + nonceOffset);
+
+        console2.log("\nCurrent nonce:", currentNonce);
+        console2.log("Predicted TokenManager address:", predictedTokenManager);
+
+        // Mine for salt to get correct hook address (with TokenManager in constructor)
         bytes memory creationCode = type(PredictionMarketHook).creationCode;
-        bytes memory constructorArgs = abi.encode(IPoolManager(poolManager));
+        bytes memory constructorArgs = abi.encode(IPoolManager(poolManager), predictedTokenManager);
 
         console2.log("\nMining for hook address with correct flags...");
         (address hookAddress, bytes32 salt) = HookMiner.find(
@@ -73,37 +93,52 @@ contract DeployTestnet is Script {
 
         DeploymentAddresses memory addrs;
         addrs.poolManager = poolManager;
-        addrs.collateralToken = collateralToken;
 
-        // 1. Deploy Mock Oracle (for testing)
-        console2.log("\n1. Deploying MockChainlinkOracle...");
+        // 1. Deploy collateral token (if needed)
+        if (deployCollateral) {
+            console2.log("\n1. Deploying Mock USDC...");
+            MockUSDC mockUSDC = new MockUSDC();
+            addrs.collateralToken = address(mockUSDC);
+            console2.log("   Mock USDC deployed at:", addrs.collateralToken);
+            console2.log("   Initial balance:", mockUSDC.balanceOf(deployer));
+        } else {
+            collateralToken = vm.envAddress("COLLATERAL_TOKEN");
+            addrs.collateralToken = collateralToken;
+            console2.log("\n1. Using existing collateral token:", collateralToken);
+        }
+
+        // 2. Deploy Mock Oracle (for testing)
+        console2.log("\n2. Deploying MockChainlinkOracle...");
         MockChainlinkOracle oracle = new MockChainlinkOracle();
         addrs.oracle = address(oracle);
         console2.log("   Oracle deployed at:", addrs.oracle);
 
-        // 2. Deploy PredictionMarketHook using CREATE2 with the mined salt
-        console2.log("\n2. Deploying PredictionMarketHook...");
-        PredictionMarketHook hook = new PredictionMarketHook{salt: salt}(IPoolManager(poolManager));
+        // 3. Deploy TokenManager FIRST (with predicted Hook address)
+        console2.log("\n3. Deploying TokenManager...");
+        TokenManager tokenManager = new TokenManager(hookAddress);
+        addrs.tokenManager = address(tokenManager);
+        console2.log("   TokenManager deployed at:", addrs.tokenManager);
+
+        // Verify prediction was correct
+        require(address(tokenManager) == predictedTokenManager, "TokenManager address prediction failed");
+
+        // 4. Deploy PredictionMarketHook using CREATE2 with the mined salt
+        console2.log("\n4. Deploying PredictionMarketHook...");
+        PredictionMarketHook hook = new PredictionMarketHook{salt: salt}(IPoolManager(poolManager), address(tokenManager));
         require(address(hook) == hookAddress, "Hook address mismatch");
         addrs.hook = address(hook);
         console2.log("   Hook deployed at:", addrs.hook);
 
-        // 3. Deploy TokenManager
-        console2.log("\n3. Deploying TokenManager...");
-        TokenManager tokenManager = new TokenManager(address(hook));
-        addrs.tokenManager = address(tokenManager);
-        console2.log("   TokenManager deployed at:", addrs.tokenManager);
-
         vm.stopBroadcast();
 
-        // 4. Save deployment addresses
+        // 5. Save deployment addresses
         saveDeploymentAddresses(addrs);
 
-        // 5. Print summary
-        printDeploymentSummary(addrs);
+        // 6. Print summary
+        printDeploymentSummary(addrs, deployCollateral);
 
-        // 6. Verification instructions
-        printVerificationInstructions(addrs);
+        // 7. Verification instructions
+        printVerificationInstructions(addrs, deployCollateral);
     }
     
     function saveDeploymentAddresses(DeploymentAddresses memory addrs) internal {
@@ -123,7 +158,7 @@ contract DeployTestnet is Script {
         console2.log("\n\nDeployment addresses saved to:", filename);
     }
     
-    function printDeploymentSummary(DeploymentAddresses memory addrs) internal view {
+    function printDeploymentSummary(DeploymentAddresses memory addrs, bool deployedCollateral) internal view {
         console2.log("\n\n=================================================");
         console2.log("DEPLOYMENT SUMMARY");
         console2.log("=================================================");
@@ -137,24 +172,39 @@ contract DeployTestnet is Script {
         console2.log("  MockOracle:          ", addrs.oracle);
         console2.log("=================================================");
         console2.log("\nUpdate your .env file with:");
+        if (deployedCollateral) {
+            console2.log("COLLATERAL_TOKEN=%s", addrs.collateralToken);
+        }
         console2.log("HOOK_ADDRESS=%s", addrs.hook);
         console2.log("TOKEN_MANAGER=%s", addrs.tokenManager);
         console2.log("ORACLE_ADDRESS=%s", addrs.oracle);
     }
     
-    function printVerificationInstructions(DeploymentAddresses memory addrs) internal view {
+    function printVerificationInstructions(DeploymentAddresses memory addrs, bool deployedCollateral) internal view {
         console2.log("\n\nVERIFICATION INSTRUCTIONS:");
         console2.log("=================================================");
         console2.log("Use the following addresses to verify on block explorer:");
-        console2.log("\n1. MockOracle:", addrs.oracle);
+
+        uint8 contractNum = 1;
+
+        if (deployedCollateral) {
+            console2.log("\n%d. MockUSDC:", contractNum, addrs.collateralToken);
+            console2.log("   Contract: src/mocks/MockUSDC.sol:MockUSDC");
+            console2.log("   Constructor args: none");
+            contractNum++;
+        }
+
+        console2.log("\n%d. MockOracle:", contractNum, addrs.oracle);
         console2.log("   Contract: src/mocks/MockChainlinkOracle.sol:MockChainlinkOracle");
         console2.log("   Constructor args: none");
+        contractNum++;
 
-        console2.log("\n2. PredictionMarketHook:", addrs.hook);
+        console2.log("\n%d. PredictionMarketHook:", contractNum, addrs.hook);
         console2.log("   Contract: src/PredictionMarketHook.sol:PredictionMarketHook");
         console2.log("   Constructor args: poolManager =", addrs.poolManager);
+        contractNum++;
 
-        console2.log("\n3. TokenManager:", addrs.tokenManager);
+        console2.log("\n%d. TokenManager:", contractNum, addrs.tokenManager);
         console2.log("   Contract: src/TokenManager.sol:TokenManager");
         console2.log("   Constructor args: hook =", addrs.hook);
 
