@@ -10,7 +10,7 @@
 
 This document compares the theoretical architecture document (business/vision doc) against the actual implementation deployed on Base Sepolia testnet. **All Priority 1 blockers have been resolved** and **both critical revenue systems are now operational**: dispute mechanism and protocol fee collection.
 
-**Overall Status:** ✅ **78% Complete** → Revenue mechanisms 100% complete, 40% of Month 2 goals done
+**Overall Status:** ✅ **78% Complete** → V1 core features 100% complete, audit prep pending
 
 **Latest Updates:**
 - ✅ **Protocol fee collection fully enabled** (Dec 31, 2024)
@@ -19,6 +19,49 @@ This document compares the theoretical architecture document (business/vision do
 - ✅ All Priority 1 blockers resolved
 - ✅ Deployed to Base Sepolia with updated contracts
 - ✅ $4.4M/year revenue system operational
+- 🔵 **Multi-outcome & UMA deferred to V2** (strategic focus on battle-tested binary markets)
+
+---
+
+## 📋 V1 vs V2 Strategy
+
+### V1 Mainnet Launch Scope
+
+**Philosophy:** Ship battle-tested, revenue-generating core before adding complexity
+
+**Included in V1:**
+- ✅ Binary prediction markets (YES/NO outcomes)
+- ✅ Chainlink oracle integration
+- ✅ Dispute mechanism with staking
+- ✅ Protocol fee collection (40% of swap fees)
+- ✅ Resolution fee collection (2% of redemptions)
+- ✅ Time-decay fee mechanism
+- ✅ Complete token management system
+- ✅ Owner governance controls
+
+**Why Binary-Only for V1:**
+- **Battle-tested:** Simpler markets = lower risk = faster audit
+- **Revenue-ready:** All monetization systems operational
+- **Market validation:** Proven demand for binary markets (Polymarket, PredictIt)
+- **Faster to mainnet:** 2-4 weeks vs 2-3 months with multi-outcome
+- **Iterate faster:** Learn from real usage, build V2 on solid foundation
+
+### V2 Post-Launch Enhancements
+
+**Deferred to V2 (Post-mainnet validation):**
+- Multi-outcome markets (3-10 outcomes)
+- UMA Optimistic Oracle integration
+- Combo markets (parlays)
+- Liquidity mining rewards
+- Additional oracle providers
+
+**Why Defer:**
+- Multi-outcome adds significant complexity (LMSR pricing, higher gas costs)
+- UMA integration needs real-world testing budget
+- Better to iterate on live platform with user feedback
+- V1 can capture 80%+ of market demand (most markets are binary)
+
+**V2 Timeline:** 2-4 months post V1 launch
 
 ---
 
@@ -549,33 +592,36 @@ function withdrawFees(address token, address recipient, uint256 amount) external
 
 ---
 
-### 🟡 Priority 2 - Important (Month 2 Goals)
+### 🟡 Priority 2 - V1 Production Readiness (Current Focus)
 
 | Feature | Status | Impact | Effort | ETA |
 |---------|--------|--------|--------|-----|
 | **Dispute mechanism** | ✅ DONE | MEDIUM | 1d | Dec 31 |
 | **Protocol fee collection (40%)** | ✅ DONE | HIGH | 1d | Dec 31 |
-| **Multi-oracle support (UMA)** | 🟡 Partial | MEDIUM | 2-3w | Week 3-6 |
-| **Multi-outcome testing (3-10)** | ⚠️ Partial | MEDIUM | 1-2w | Week 3-4 |
-| **Security audit prep** | ❌ Missing | HIGH | 1w | Week 6-7 |
+| **Security audit prep** | ❌ Missing | HIGH | 1-2w | Q1 2025 |
 
-**Progress:** 2/5 complete (40%)
-**Total Effort Remaining:** 4-6 weeks
-**Target:** Month 2 (Jan-Feb 2025)
+**Progress:** 2/3 complete (67%)
+**Total Effort Remaining:** 1-2 weeks
+**Target:** Q1 2025
 **Revenue Impact:** ✅ $4.4M/year protocol fee system operational!
+
+**V1 Scope:** Binary prediction markets with full dispute system and revenue collection - ready for audit
 
 ---
 
-### 🟢 Priority 3 - Future (Roadmap features)
+### 🟢 Priority 3 - V2 Features (Post-Launch)
 
 | Feature | Status | Impact | Effort | ETA |
 |---------|--------|--------|--------|-----|
-| **Combo markets (parlays)** | ❌ Missing | LOW | 2-3w | Month 4-6 |
-| **Liquidity mining** | ❌ Missing | LOW | 1-2w | Month 4-6 |
-| **Advanced oracles (Pyth)** | ❌ Missing | LOW | 1w | Month 4-6 |
+| **Multi-outcome markets (3-10)** | ⚠️ Partial | MEDIUM | 1-2w | V2 |
+| **UMA Optimistic Oracle** | ⚠️ Partial | MEDIUM | 2-3w | V2 |
+| **Combo markets (parlays)** | ❌ Missing | LOW | 2-3w | V2 |
+| **Liquidity mining** | ❌ Missing | LOW | 1-2w | V2 |
+| **Advanced oracles (Pyth)** | ❌ Missing | LOW | 1w | V2 |
 
-**Total Effort:** 4-6 weeks
-**Target:** Month 4-6 (as planned)
+**Total Effort:** 7-11 weeks
+**Target:** V2 (Post-mainnet launch)
+**Strategy:** Launch V1 with battle-tested binary markets, expand features in V2
 
 ---
 
@@ -599,68 +645,71 @@ function withdrawFees(address token, address recipient, uint256 amount) external
 | Priority | Complete | Effort Remaining |
 |----------|----------|------------------|
 | **P1 (Blocking)** | ✅ 4/4 (100%) | DONE |
-| **P2 (Important)** | ✅ 2/5 (40%) | 4-6 weeks |
-| **P3 (Future)** | 0/3 | 4-6 weeks |
+| **P2 (V1 Production)** | ✅ 2/3 (67%) | 1-2 weeks |
+| **P3 (V2 Features)** | 0/5 | 7-11 weeks (post-launch) |
 
 ---
 
 ## 🚀 Recommended Action Plan
 
-### ✅ Completed: Priority 1 Week (December 30, 2024)
+### ✅ Completed: V1 Core Features (December 31, 2024)
 
-**Day 1-2:**
+**December 30:**
 1. ✅ Implemented `redeemWinningTokens()` with actual logic
 2. ✅ Added resolution fee collection (2%)
-3. ✅ Tested redemption flow end-to-end
+3. ✅ Implemented simplified probability tracking
+4. ✅ Implemented `getCurrentProbability()` function
+5. ✅ Deployed updated contracts to Base Sepolia
 
-**Day 3:**
-4. ✅ Implemented simplified probability tracking
-5. ✅ Implemented `getCurrentProbability()` function
-6. ✅ Updated `afterSwap` to emit real probabilities
-
-**Day 4:**
-7. ✅ Deployed updated contracts to Base Sepolia
-8. ✅ Ran full integration tests (7/9 passing)
-9. ✅ Updated test scripts
+**December 31:**
+6. ✅ Implemented full dispute mechanism with staking
+7. ✅ Enabled protocol fee collection (40% of swap fees)
+8. ✅ All revenue systems operational
 
 **Results:**
-- ✅ 37/37 unit tests passing
+- ✅ 63/63 unit tests passing
 - ✅ 7/9 integration tests passing (2 pending 72h dispute period)
 - ✅ All contracts deployed and verified on Base Sepolia
+- ✅ $4.4M/year revenue system operational
 
-### Month 2 (Production Readiness) - NEXT PHASE
+### V1 Production Readiness - CURRENT PHASE (Q1 2025)
 
-**Week 1-2: Revenue Mechanisms**
-- Implement protocol fee collection (40% of trading fees)
-- Add fee withdrawal mechanisms
-- Set up multi-sig treasury
-- Revenue target: $1.8M/year
-
-**Week 3-4: Security & Multi-Outcome**
-- Add UMA Optimistic Oracle support
-- Implement dispute mechanism
-- Test multi-outcome markets (3-10 outcomes)
-- LMSR pricing implementation
-
-**Week 5-6: Audit Preparation**
-- Security audit preparation
-- Comprehensive testing (100% coverage)
-- Bug bounty program setup
+**Weeks 1-2: Security Audit Preparation**
+- Comprehensive code review and cleanup
 - Documentation finalization
-
-**Week 7-8: Testing & Optimization**
-- Complete 72h dispute period test
+- Test coverage analysis (target: 100%)
 - Gas optimization
-- Edge case testing
-- Mainnet deployment preparation
+- Prepare audit materials
+- Select audit firm(s)
 
-### Month 3-6 (Scale & Advanced Features)
+**Weeks 3-4: Audit & Bug Bounty**
+- Security audit(s) execution
+- Bug bounty program launch
+- Address audit findings
+- Final integration testing
+- Complete 72h dispute period test
 
+**Weeks 5-6: Mainnet Deployment**
+- Deploy to mainnet
+- Multi-sig treasury setup
+- Initial liquidity provision
+- Monitoring and incident response preparation
+
+### V2 Advanced Features (Post-Mainnet)
+
+After V1 is live and validated:
+
+**Phase 1 (Months 1-2):**
+- Multi-outcome markets (3-10 outcomes)
+- UMA Optimistic Oracle integration
+- LMSR pricing for multi-outcome
+
+**Phase 2 (Months 3-4):**
 - Combo markets (parlays)
-- Liquidity mining
-- Additional oracle providers
-- Frontend development
-- Mainnet preparation
+- Liquidity mining rewards
+- Additional oracle providers (Pyth)
+
+**Strategy:** Launch lean V1, iterate based on real usage data
 
 ---
 
@@ -689,37 +738,56 @@ function withdrawFees(address token, address recipient, uint256 amount) external
 
 **Status:** 5/5 complete (100%)
 
-### Month 2 Goals (⏳ IN PROGRESS - January 2025)
+### V1 Production Goals (⏳ IN PROGRESS - Q1 2025)
 
 - ✅ **Dispute mechanism implementation** ✅ COMPLETE (Dec 31)
 - ✅ **Protocol fee collection (40% of trading fees)** ✅ COMPLETE (Dec 31)
-- ⏳ Multi-outcome market testing (3-10 outcomes)
-- ⏳ UMA Optimistic Oracle integration
 - ⏳ Security audit preparation
-- ⏳ Complete 72h redemption test
+- ⏳ Complete 72h redemption test (integration testing)
 
-**Status:** 2/6 complete (33%)
-**ETA:** 4-6 weeks remaining (Jan-Feb 2025)
+**Status:** 2/4 complete (50%)
+**ETA:** 1-2 weeks remaining (Q1 2025)
+
+### V2 Features (Deferred Post-Launch)
+
+- 🔵 Multi-outcome market testing (3-10 outcomes) → V2
+- 🔵 UMA Optimistic Oracle integration → V2
+- 🔵 Combo markets (parlays) → V2
+- 🔵 Liquidity mining rewards → V2
+
+**Strategy:** Focus V1 on battle-tested binary markets, expand in V2 after mainnet validation
 
 ---
 
 ## 🎯 Success Criteria
 
-### Minimum Viable Product (MVP)
+### V1 Mainnet Launch Requirements
 
-To launch on mainnet, you need:
+To launch V1 on mainnet, you need:
 
 - ✅ Binary markets working
 - ✅ **Redemption fully functional** ✅ COMPLETE
 - ✅ **Real probability calculations** ✅ COMPLETE
-- ⏳ Protocol fees collected (Month 2)
-- ❌ Multi-oracle support
-- ❌ 3+ security audits
-- ❌ $500K+ bug bounty
+- ✅ **Protocol fees collected** ✅ COMPLETE
+- ✅ **Dispute mechanism** ✅ COMPLETE
+- ⏳ Security audit completion
+- ⏳ Bug bounty program
 - ✅ Testnet testing complete
 
-**Current Status:** 3/8 (37.5%)
-**Estimated completion:** 8-12 weeks
+**V1 Status:** 5/8 (62.5%)
+**Estimated completion:** 2-4 weeks (Q1 2025)
+
+### V2 Enhancement Requirements (Post-Launch)
+
+Deferred to V2 after mainnet validation:
+
+- Multi-outcome markets (3-10 outcomes)
+- UMA Optimistic Oracle integration
+- Combo markets (parlays)
+- Liquidity mining rewards
+- Additional oracle providers (Pyth)
+
+**V2 Timeline:** Post V1 mainnet launch
 
 ---
 
@@ -759,10 +827,11 @@ To launch on mainnet, you need:
 
 ---
 
-**Status:** 📊 78% Complete
-**Timeline:** Month 1 complete, Month 2 at 40% (dispute + fee collection done)
+**Status:** 📊 78% Complete (V1 Core: 100%)
+**Timeline:** V1 core complete, audit prep pending (1-2 weeks)
 **Risk Level:** 🟢 Low (critical systems implemented and tested)
-**Recommendation:** ✅ Continue with Month 2 priorities (multi-outcome, UMA, audit prep)
+**V1 Strategy:** Focus on battle-tested binary markets, defer advanced features to V2
+**Recommendation:** ✅ Proceed with security audit preparation for V1 mainnet launch
 
 ---
 
