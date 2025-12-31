@@ -521,9 +521,14 @@ contract PredictionMarketHook is BaseHook, Initializable, UUPSUpgradeable, Ownab
             // Update TokenManager
             TokenManager(tokenManager).resolveMarket(market.eventId, market.winningOutcome);
 
-            // Refund stake + 20% reward
+            // Refund stake + 20% reward (reward comes from protocol fees)
             uint256 reward = (dispute.stakeAmount * DISPUTE_REWARD_PERCENT) / 100;
             uint256 totalPayout = dispute.stakeAmount + reward;
+
+            // Deduct reward from protocol fees
+            require(protocolFees[market.collateralToken] >= reward, "Insufficient protocol fees for reward");
+            protocolFees[market.collateralToken] -= reward;
+
             IERC20(market.collateralToken).transfer(dispute.disputer, totalPayout);
 
             emit DisputeResolved(poolId, disputeId, true, market.winningOutcome);

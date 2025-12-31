@@ -221,6 +221,16 @@ contract DisputeMechanismTest is Test, Deployers {
         oracle.setLatestAnswerWithTimestamp(0, eventTimestamp + 1);
         hook.resolveMarket(poolId);
 
+        // First, create protocol fees by rejecting Bob's dispute
+        uint256 bobStake = 100e6;
+        vm.startPrank(bob);
+        collateralToken.approve(address(hook), bobStake);
+        hook.submitDispute(poolId, 1, bobStake);
+        vm.stopPrank();
+
+        // Reject Bob's dispute to build protocol fees
+        hook.resolveDispute(poolId, 0, false);
+
         // Alice disputes claiming outcome 1
         uint256 stakeAmount = 100e6;
         vm.startPrank(alice);
@@ -230,8 +240,8 @@ contract DisputeMechanismTest is Test, Deployers {
 
         uint256 aliceBalanceBefore = collateralToken.balanceOf(alice);
 
-        // Owner accepts the dispute
-        hook.resolveDispute(poolId, 0, true);
+        // Owner accepts Alice's dispute (using fees from Bob's rejected dispute)
+        hook.resolveDispute(poolId, 1, true);
 
         // Check market outcome was changed
         PredictionMarketHook.Market memory market = hook.getMarket(poolId);
@@ -296,6 +306,14 @@ contract DisputeMechanismTest is Test, Deployers {
         oracle.setLatestAnswerWithTimestamp(0, eventTimestamp + 1);
         hook.resolveMarket(poolId);
 
+        // First, create protocol fees by rejecting Bob's dispute
+        uint256 bobStake = 100e6;
+        vm.startPrank(bob);
+        collateralToken.approve(address(hook), bobStake);
+        hook.submitDispute(poolId, 1, bobStake);
+        vm.stopPrank();
+        hook.resolveDispute(poolId, 0, false);
+
         uint256 stakeAmount = 100e6;
         vm.startPrank(alice);
         collateralToken.approve(address(hook), stakeAmount);
@@ -303,11 +321,11 @@ contract DisputeMechanismTest is Test, Deployers {
         vm.stopPrank();
 
         // Resolve dispute
-        hook.resolveDispute(poolId, 0, true);
+        hook.resolveDispute(poolId, 1, true);
 
         // Try to resolve again
         vm.expectRevert(PredictionMarketHook.DisputeAlreadyResolved.selector);
-        hook.resolveDispute(poolId, 0, true);
+        hook.resolveDispute(poolId, 1, true);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -413,6 +431,14 @@ contract DisputeMechanismTest is Test, Deployers {
         oracle.setLatestAnswerWithTimestamp(0, eventTimestamp + 1);
         hook.resolveMarket(poolId);
 
+        // 1.5. Build protocol fees by rejecting Bob's dispute
+        uint256 bobStake = 100e6;
+        vm.startPrank(bob);
+        collateralToken.approve(address(hook), bobStake);
+        hook.submitDispute(poolId, 1, bobStake);
+        vm.stopPrank();
+        hook.resolveDispute(poolId, 0, false);
+
         // 2. Alice submits dispute
         uint256 stakeAmount = 200e6;
         vm.startPrank(alice);
@@ -421,7 +447,7 @@ contract DisputeMechanismTest is Test, Deployers {
         vm.stopPrank();
 
         // 3. Owner accepts dispute
-        hook.resolveDispute(poolId, 0, true);
+        hook.resolveDispute(poolId, 1, true);
 
         // 4. Wait and finalize
         vm.warp(eventTimestamp + 1 + 72 hours);
