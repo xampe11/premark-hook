@@ -198,7 +198,7 @@ contract PredictionMarketHook is BaseHook, Initializable, UUPSUpgradeable, Ownab
             beforeDonate: false,
             afterDonate: false,
             beforeSwapReturnDelta: false,
-            afterSwapReturnDelta: false,
+            afterSwapReturnDelta: true, // Enable to collect protocol fees
             afterAddLiquidityReturnDelta: false,
             afterRemoveLiquidityReturnDelta: false
         });

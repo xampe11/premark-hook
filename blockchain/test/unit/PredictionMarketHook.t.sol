@@ -51,8 +51,12 @@ contract PredictionMarketHookTest is Test, Deployers {
         eventTimestamp = block.timestamp + 30 days;
 
         // Deploy hook at correct address
-        address hookAddress =
-            address(uint160(Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG));
+        // Includes AFTER_SWAP_RETURNS_DELTA_FLAG (1 << 2) for protocol fee collection
+        address hookAddress = address(
+            uint160(
+                Hooks.BEFORE_INITIALIZE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | (1 << 2) // AFTER_SWAP_RETURNS_DELTA
+            )
+        );
 
         // Deploy token manager first (needs hook address)
         tokenManager = new TokenManager(hookAddress);
