@@ -57,9 +57,12 @@ contract PredictionMarketHookTest is Test, Deployers {
         // Deploy token manager first (needs hook address)
         tokenManager = new TokenManager(hookAddress);
 
-        // Deploy hook with manager and tokenManager addresses
-        deployCodeTo("PredictionMarketHook.sol", abi.encode(manager, address(tokenManager)), hookAddress);
+        // Deploy hook with manager address only (UUPS pattern)
+        deployCodeTo("PredictionMarketHook.sol", abi.encode(manager), hookAddress);
         hook = PredictionMarketHook(hookAddress);
+
+        // Initialize the hook
+        hook.initialize(address(tokenManager), address(this));
 
         // Create pool key
         poolKey = PoolKey({
@@ -236,6 +239,9 @@ contract PredictionMarketHookTest is Test, Deployers {
         // Wait for dispute period
         vm.warp(eventTimestamp + 1 + 72 hours);
 
+        // Finalize market after dispute period
+        hook.finalizeMarket(poolId);
+
         // Check Alice's collateral before redemption
         uint256 collateralBefore = collateralToken.balanceOf(alice);
 
@@ -261,10 +267,10 @@ contract PredictionMarketHookTest is Test, Deployers {
         oracle.setLatestAnswerWithTimestamp(1, eventTimestamp + 1);
         hook.resolveMarket(poolId);
 
-        // Try to redeem during dispute period
+        // Try to redeem before market is finalized
         uint256 amount = 100e6;
         vm.prank(alice);
-        vm.expectRevert(PredictionMarketHook.DisputePeriodActive.selector);
+        vm.expectRevert(PredictionMarketHook.MarketNotFinalized.selector);
         hook.redeemWinningTokens(poolId, amount);
     }
 

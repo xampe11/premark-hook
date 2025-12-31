@@ -124,10 +124,15 @@ contract DeployTestnet is Script {
 
         // 4. Deploy PredictionMarketHook using CREATE2 with the mined salt
         console2.log("\n4. Deploying PredictionMarketHook...");
-        PredictionMarketHook hook = new PredictionMarketHook{salt: salt}(IPoolManager(poolManager), address(tokenManager));
+        PredictionMarketHook hook = new PredictionMarketHook{salt: salt}(IPoolManager(poolManager));
         require(address(hook) == hookAddress, "Hook address mismatch");
         addrs.hook = address(hook);
         console2.log("   Hook deployed at:", addrs.hook);
+
+        // 4a. Initialize the hook
+        console2.log("\n4a. Initializing Hook...");
+        hook.initialize(address(tokenManager), msg.sender);
+        console2.log("   Hook initialized with owner:", msg.sender);
 
         vm.stopBroadcast();
 

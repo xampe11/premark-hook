@@ -13,6 +13,9 @@ import {Currency} from "v4-core/types/Currency.sol";
 import {CurrencySettler} from "v4-periphery/lib/v4-core/test/utils/CurrencySettler.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {UUPSUpgradeable} from "@openzeppelin-upgradeable/contracts/proxy/utils/UUPSUpgradeable.sol";
+import {OwnableUpgradeable} from "@openzeppelin-upgradeable/contracts/access/OwnableUpgradeable.sol";
+import {Initializable} from "@openzeppelin-upgradeable/contracts/proxy/utils/Initializable.sol";
 import {TokenManager} from "./TokenManager.sol";
 import {OutcomeToken as OutcomeTokenContract} from "./OutcomeToken.sol";
 
@@ -20,8 +23,9 @@ import {OutcomeToken as OutcomeTokenContract} from "./OutcomeToken.sol";
  * @title PredictionMarketHook
  * @notice Uniswap V4 Hook that transforms a liquidity pool into a prediction market
  * @dev Implements binary outcome markets with automated pricing, time decay, and oracle settlement
+ * @dev Uses UUPS upgradeable pattern for future improvements
  */
-contract PredictionMarketHook is BaseHook {
+contract PredictionMarketHook is BaseHook, Initializable, UUPSUpgradeable, OwnableUpgradeable {
     using PoolIdLibrary for PoolKey;
     using CurrencySettler for Currency;
 
@@ -39,6 +43,11 @@ contract PredictionMarketHook is BaseHook {
     error InvalidMarketParams();
     error UnauthorizedResolver();
     error DisputePeriodActive();
+    error MarketNotFinalized();
+    error DisputePeriodExpired();
+    error InsufficientDisputeStake();
+    error InvalidDisputeOutcome();
+    error DisputeAlreadyResolved();
 
     /*//////////////////////////////////////////////////////////////
                                  EVENTS
@@ -54,7 +63,20 @@ contract PredictionMarketHook is BaseHook {
 
     event TokensRedeemed(address indexed user, PoolId indexed poolId, uint256 amount);
 
-    event DisputeInitiated(PoolId indexed poolId, address indexed disputer, uint8 challengedOutcome);
+    event DisputeSubmitted(
+        PoolId indexed poolId,
+        uint256 indexed disputeId,
+        address indexed disputer,
+        uint8 challengedOutcome,
+        uint8 proposedOutcome,
+        uint256 stakeAmount
+    );
+
+    event DisputeResolved(PoolId indexed poolId, uint256 indexed disputeId, bool accepted, uint8 newOutcome);
+
+    event MarketFinalized(PoolId indexed poolId, uint8 finalOutcome);
+
+    event ProtocolFeeCollected(PoolId indexed poolId, address indexed token, uint256 amount);
 
     event FeesWithdrawn(address indexed token, address indexed recipient, uint256 amount);
 
@@ -72,6 +94,18 @@ contract PredictionMarketHook is BaseHook {
         uint256 resolutionTime; // When market was resolved
         uint256 totalVolume; // Cumulative trading volume
         address creator; // Market creator address
+        bool finalized; // Whether dispute period has ended and market is final
+        address collateralToken; // Collateral token address for disputes
+    }
+
+    struct Dispute {
+        address disputer; // Address that submitted the dispute
+        uint8 challengedOutcome; // The outcome being challenged
+        uint8 proposedOutcome; // What the disputer believes is correct
+        uint256 stakeAmount; // Amount of collateral staked
+        uint256 timestamp; // When dispute was submitted
+        bool resolved; // Whether admin has reviewed this dispute
+        bool accepted; // Whether dispute was deemed valid
     }
 
     struct OutcomeToken {
@@ -89,8 +123,17 @@ contract PredictionMarketHook is BaseHook {
     /// @notice Maps pool ID to outcome tokens
     mapping(PoolId => OutcomeToken[]) public outcomeTokens;
 
+    /// @notice Maps pool ID to all disputes for that market
+    mapping(PoolId => Dispute[]) public disputes;
+
     /// @notice Dispute period duration (72 hours)
     uint256 public constant DISPUTE_PERIOD = 72 hours;
+
+    /// @notice Minimum stake required to submit a dispute (100 USDC)
+    uint256 public constant MIN_DISPUTE_STAKE = 100e6;
+
+    /// @notice Reward for valid disputes (20% of stake)
+    uint256 public constant DISPUTE_REWARD_PERCENT = 20;
 
     /// @notice Protocol fee (40% of trading fees)
     uint256 public constant PROTOCOL_FEE_PERCENT = 40;
@@ -99,7 +142,7 @@ contract PredictionMarketHook is BaseHook {
     uint256 public constant RESOLUTION_FEE_PERCENT = 2;
 
     /// @notice TokenManager contract address
-    address public immutable tokenManager;
+    address public tokenManager;
 
     /// @notice Protocol fees collected (in collateral tokens)
     /// @dev Maps collateral token address => accumulated fees
@@ -111,12 +154,32 @@ contract PredictionMarketHook is BaseHook {
     mapping(PoolId => uint256) public estimatedProbability;
 
     /*//////////////////////////////////////////////////////////////
-                               CONSTRUCTOR
+                            CONSTRUCTOR & INITIALIZER
     //////////////////////////////////////////////////////////////*/
 
-    constructor(IPoolManager _poolManager, address _tokenManager) BaseHook(_poolManager) {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor(IPoolManager _poolManager) BaseHook(_poolManager) {
+        // Note: _disableInitializers() intentionally omitted for testing flexibility
+        // In production, deploy via UUPS proxy which will prevent implementation initialization
+    }
+
+    /**
+     * @notice Initialize the upgradeable contract
+     * @param _tokenManager Address of the TokenManager contract
+     * @param _owner Address of the contract owner
+     */
+    function initialize(address _tokenManager, address _owner) external initializer {
+        __Ownable_init(_owner);
+
         tokenManager = _tokenManager;
     }
+
+    /**
+     * @notice Authorize upgrade to new implementation (UUPS required)
+     * @dev Only owner can authorize upgrades
+     * @param newImplementation Address of new implementation contract
+     */
+    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
     /*//////////////////////////////////////////////////////////////
                             HOOK PERMISSIONS
@@ -195,6 +258,12 @@ contract PredictionMarketHook is BaseHook {
 
         PoolId poolId = key.toId();
 
+        // Determine collateral token (use currency1, or currency0 if currency1 is native)
+        address collateralToken = Currency.unwrap(key.currency1);
+        if (collateralToken == address(0)) {
+            collateralToken = Currency.unwrap(key.currency0);
+        }
+
         // Store market data
         markets[poolId] = Market({
             eventId: eventId,
@@ -205,7 +274,9 @@ contract PredictionMarketHook is BaseHook {
             winningOutcome: 0,
             resolutionTime: 0,
             totalVolume: 0,
-            creator: msg.sender
+            creator: msg.sender,
+            finalized: false,
+            collateralToken: collateralToken
         });
 
         // Create outcome tokens and register with TokenManager
@@ -286,7 +357,50 @@ contract PredictionMarketHook is BaseHook {
         // Emit updated probability (convert basis points to 1e18)
         emit ProbabilityUpdated(poolId, (currentProb * 1e18) / 10000);
 
-        return (BaseHook.afterSwap.selector, 0);
+        // Collect protocol fee (40% of swap fees)
+        int128 protocolFeeAmount = _collectProtocolFee(key, params, delta);
+
+        return (BaseHook.afterSwap.selector, protocolFeeAmount);
+    }
+
+    /**
+     * @notice Collect 40% of swap fees as protocol revenue
+     * @param key Pool key
+     * @param params Swap parameters
+     * @param delta Balance changes from the swap
+     * @return protocolFeeAmount The fee amount taken (as int128 for pool accounting)
+     */
+    function _collectProtocolFee(PoolKey calldata key, SwapParams calldata params, BalanceDelta delta)
+        internal
+        returns (int128)
+    {
+        // Determine which currency received the fee (the unspecified token)
+        bool specifiedTokenIs0 = (params.amountSpecified < 0 == params.zeroForOne);
+        (Currency feeCurrency, int128 swapAmount) =
+            (specifiedTokenIs0) ? (key.currency1, delta.amount1()) : (key.currency0, delta.amount0());
+
+        // Get absolute value of swap output
+        if (swapAmount < 0) swapAmount = -swapAmount;
+
+        // Calculate swap fee: key.fee is in Uniswap V4 units where 1000000 = 100%
+        // e.g., 3000 = 0.3%
+        uint256 swapFee = (uint128(swapAmount) * uint256(key.fee)) / 1000000;
+
+        // Protocol takes 40% of the swap fee
+        uint256 protocolFee = (swapFee * PROTOCOL_FEE_PERCENT) / 100;
+
+        if (protocolFee > 0) {
+            // Take the fee from the pool manager
+            poolManager.take(feeCurrency, address(this), protocolFee);
+
+            // Track accumulated fees by token
+            address tokenAddr = Currency.unwrap(feeCurrency);
+            protocolFees[tokenAddr] += protocolFee;
+
+            emit ProtocolFeeCollected(key.toId(), tokenAddr, protocolFee);
+        }
+
+        return int128(uint128(protocolFee));
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -341,6 +455,110 @@ contract PredictionMarketHook is BaseHook {
     }
 
     /*//////////////////////////////////////////////////////////////
+                            DISPUTE MECHANISM
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Submit a dispute challenging the oracle's resolution
+     * @param poolId The pool ID
+     * @param proposedOutcome What the disputer believes is the correct outcome
+     * @param stakeAmount Amount of collateral to stake (min 100 USDC)
+     */
+    function submitDispute(PoolId poolId, uint8 proposedOutcome, uint256 stakeAmount) external {
+        Market storage market = markets[poolId];
+
+        // Validation
+        if (!market.isResolved) revert MarketNotResolved();
+        if (market.finalized) revert DisputePeriodExpired();
+        if (block.timestamp > market.resolutionTime + DISPUTE_PERIOD) revert DisputePeriodExpired();
+        if (stakeAmount < MIN_DISPUTE_STAKE) revert InsufficientDisputeStake();
+        if (proposedOutcome >= market.numOutcomes) revert InvalidDisputeOutcome();
+        if (proposedOutcome == market.winningOutcome) revert InvalidDisputeOutcome(); // Can't dispute to same outcome
+
+        // Transfer stake from disputer
+        IERC20(market.collateralToken).transferFrom(msg.sender, address(this), stakeAmount);
+
+        // Create dispute
+        uint256 disputeId = disputes[poolId].length;
+        disputes[poolId].push(
+            Dispute({
+                disputer: msg.sender,
+                challengedOutcome: market.winningOutcome,
+                proposedOutcome: proposedOutcome,
+                stakeAmount: stakeAmount,
+                timestamp: block.timestamp,
+                resolved: false,
+                accepted: false
+            })
+        );
+
+        emit DisputeSubmitted(
+            poolId, disputeId, msg.sender, market.winningOutcome, proposedOutcome, stakeAmount
+        );
+    }
+
+    /**
+     * @notice Resolve a dispute (owner only)
+     * @param poolId The pool ID
+     * @param disputeId The dispute ID
+     * @param accepted Whether the dispute is valid
+     */
+    function resolveDispute(PoolId poolId, uint256 disputeId, bool accepted) external onlyOwner {
+        Market storage market = markets[poolId];
+        Dispute storage dispute = disputes[poolId][disputeId];
+
+        // Validation
+        if (!market.isResolved) revert MarketNotResolved();
+        if (dispute.resolved) revert DisputeAlreadyResolved();
+
+        dispute.resolved = true;
+        dispute.accepted = accepted;
+
+        if (accepted) {
+            // Dispute was valid - change winning outcome
+            market.winningOutcome = dispute.proposedOutcome;
+
+            // Update TokenManager
+            TokenManager(tokenManager).resolveMarket(market.eventId, market.winningOutcome);
+
+            // Refund stake + 20% reward
+            uint256 reward = (dispute.stakeAmount * DISPUTE_REWARD_PERCENT) / 100;
+            uint256 totalPayout = dispute.stakeAmount + reward;
+            IERC20(market.collateralToken).transfer(dispute.disputer, totalPayout);
+
+            emit DisputeResolved(poolId, disputeId, true, market.winningOutcome);
+        } else {
+            // Dispute was invalid - stake goes to protocol fees
+            protocolFees[market.collateralToken] += dispute.stakeAmount;
+
+            emit DisputeResolved(poolId, disputeId, false, market.winningOutcome);
+        }
+    }
+
+    /**
+     * @notice Finalize market after dispute period ends
+     * @param poolId The pool ID
+     */
+    function finalizeMarket(PoolId poolId) external {
+        Market storage market = markets[poolId];
+
+        // Validation
+        if (!market.isResolved) revert MarketNotResolved();
+        if (market.finalized) revert MarketAlreadyResolved(); // Reusing error
+        if (block.timestamp < market.resolutionTime + DISPUTE_PERIOD) revert DisputePeriodActive();
+
+        // Check all disputes are resolved
+        Dispute[] storage marketDisputes = disputes[poolId];
+        for (uint256 i = 0; i < marketDisputes.length; i++) {
+            require(marketDisputes[i].resolved, "Unresolved disputes exist");
+        }
+
+        market.finalized = true;
+
+        emit MarketFinalized(poolId, market.winningOutcome);
+    }
+
+    /*//////////////////////////////////////////////////////////////
                             SETTLEMENT LOGIC
     //////////////////////////////////////////////////////////////*/
 
@@ -353,9 +571,7 @@ contract PredictionMarketHook is BaseHook {
         Market storage market = markets[poolId];
 
         if (!market.isResolved) revert MarketNotResolved();
-        if (block.timestamp < market.resolutionTime + DISPUTE_PERIOD) {
-            revert DisputePeriodActive();
-        }
+        if (!market.finalized) revert MarketNotFinalized();
 
         // Get collateral token address from TokenManager
         address collateralToken = TokenManager(tokenManager).getCollateralToken(market.eventId);
@@ -547,8 +763,7 @@ contract PredictionMarketHook is BaseHook {
      * @param recipient Address to receive the fees
      * @param amount Amount of fees to withdraw
      */
-    function withdrawFees(address token, address recipient, uint256 amount) external {
-        // Note: In production, add access control (onlyOwner or similar)
+    function withdrawFees(address token, address recipient, uint256 amount) external onlyOwner {
         require(amount <= protocolFees[token], "Insufficient fees");
         require(recipient != address(0), "Invalid recipient");
 

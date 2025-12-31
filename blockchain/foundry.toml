@@ -16,6 +16,7 @@ remappings = [
     "v4-periphery/=lib/v4-periphery/",
     "@chainlink/contracts/=lib/chainlink-brownie-contracts/contracts/",
     "@openzeppelin/=lib/openzeppelin-contracts/",
+    "@openzeppelin-upgradeable/=lib/openzeppelin-contracts-upgradeable/",
     "ds-test/=lib/solmate/lib/ds-test/src/",
 ]
 fs_permissions = [

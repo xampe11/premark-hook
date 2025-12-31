@@ -5,6 +5,7 @@ import {Script} from "forge-std/Script.sol";
 import {console2} from "forge-std/console2.sol";
 import {IPoolManager} from "v4-core/interfaces/IPoolManager.sol";
 import {PoolKey} from "v4-core/types/PoolKey.sol";
+import {PoolId, PoolIdLibrary} from "v4-core/types/PoolId.sol";
 import {Currency} from "v4-core/types/Currency.sol";
 import {IERC20} from "forge-std/interfaces/IERC20.sol";
 
@@ -19,6 +20,8 @@ import {MockChainlinkOracle} from "../src/mocks/MockChainlinkOracle.sol";
  * @dev Tests the full flow: create market, mint, burn, and redeem
  */
 contract TestBaseSepolia is Script {
+    using PoolIdLibrary for PoolKey;
+
     struct DeployedContracts {
         address poolManager;
         address collateralToken;
@@ -76,6 +79,15 @@ contract TestBaseSepolia is Script {
 
         // Test 5: Update oracle price
         test_UpdateOracle(deployerPrivateKey);
+
+        // Test 6: Get probability (Priority 1 feature)
+        test_GetProbability();
+
+        // Test 7: Resolve market and redeem winning tokens (Priority 1 features)
+        test_ResolveAndRedeem(deployerPrivateKey, deployer);
+
+        // Test 8: Withdraw fees (Priority 1 feature)
+        test_WithdrawFees(deployerPrivateKey);
 
         console2.log("\n=================================================");
         console2.log("ALL TESTS COMPLETED");
@@ -286,6 +298,166 @@ contract TestBaseSepolia is Script {
         console2.log("Current oracle price:", uint256(answer));
 
         console2.log("\n[RESULT] Oracle updated successfully!");
+    }
+
+    function test_GetProbability() internal view {
+        console2.log("\n[TEST 6] Getting current market probability...");
+        console2.log("-----------------------------------------------");
+
+        PredictionMarketHook hook = PredictionMarketHook(deployed.hook);
+
+        // Get pool ID from the pool key
+        PoolKey memory key = PoolKey({
+            currency0: Currency.wrap(address(0)),
+            currency1: Currency.wrap(deployed.collateralToken),
+            fee: 3000,
+            tickSpacing: 60,
+            hooks: hook
+        });
+
+        PoolId poolId = key.toId();
+
+        try hook.getCurrentProbability(poolId) returns (uint256 probability) {
+            // Probability is in 1e18 format, convert to percentage
+            uint256 percentage = (probability * 100) / 1e18;
+            console2.log("Current probability:", probability);
+            console2.log("As percentage:", percentage, "%");
+            console2.log("\n[RESULT] Probability retrieved successfully!");
+        } catch Error(string memory reason) {
+            console2.log("Failed to get probability:", reason);
+            console2.log("\n[RESULT] Test failed");
+        }
+    }
+
+    function test_ResolveAndRedeem(uint256 privateKey, address deployer) internal {
+        console2.log("\n[TEST 7] Resolving market and redeeming winning tokens...");
+        console2.log("----------------------------------------------------------");
+
+        PredictionMarketHook hook = PredictionMarketHook(deployed.hook);
+        TokenManager tokenManager = TokenManager(deployed.tokenManager);
+        MockChainlinkOracle oracle = MockChainlinkOracle(deployed.oracle);
+
+        // Get pool ID
+        PoolKey memory key = PoolKey({
+            currency0: Currency.wrap(address(0)),
+            currency1: Currency.wrap(deployed.collateralToken),
+            fee: 3000,
+            tickSpacing: 60,
+            hooks: hook
+        });
+        PoolId poolId = key.toId();
+
+        // Check if we have outcome tokens to redeem
+        uint256 outcomeCount = tokenManager.getOutcomeCount(testMarketId);
+        if (outcomeCount == 0) {
+            console2.log("No outcome tokens found - skipping redemption test");
+            console2.log("\n[RESULT] Test skipped");
+            return;
+        }
+
+        address yesToken = tokenManager.getOutcomeToken(testMarketId, 1);
+        uint256 yesBalance = OutcomeToken(yesToken).balanceOf(deployer);
+
+        if (yesBalance == 0) {
+            console2.log("No YES tokens to redeem - skipping redemption test");
+            console2.log("\n[RESULT] Test skipped");
+            return;
+        }
+
+        console2.log("YES token balance before:", yesBalance);
+
+        vm.startBroadcast(privateKey);
+
+        // Warp time to after event
+        vm.warp(testEventTimestamp + 1);
+        console2.log("Warped to after event time");
+
+        // Set oracle result (YES wins = outcome 1)
+        try oracle.setLatestAnswerWithTimestamp(1, testEventTimestamp + 1) {
+            console2.log("Oracle set to YES outcome");
+        } catch Error(string memory reason) {
+            console2.log("Failed to set oracle:", reason);
+            vm.stopBroadcast();
+            return;
+        }
+
+        // Resolve market
+        try hook.resolveMarket(poolId) {
+            console2.log("Market resolved successfully");
+        } catch Error(string memory reason) {
+            console2.log("Failed to resolve market:", reason);
+            vm.stopBroadcast();
+            return;
+        }
+
+        // Wait for dispute period (72 hours)
+        vm.warp(testEventTimestamp + 1 + 72 hours);
+        console2.log("Dispute period ended");
+
+        // Get collateral balance before redemption
+        uint256 collateralBefore = IERC20(deployed.collateralToken).balanceOf(deployer);
+        console2.log("Collateral balance before redemption:", collateralBefore);
+
+        // Redeem winning tokens (should get 98% back due to 2% fee)
+        uint256 redeemAmount = yesBalance;
+        try hook.redeemWinningTokens(poolId, redeemAmount) {
+            console2.log("Redeemed", redeemAmount, "winning tokens");
+        } catch Error(string memory reason) {
+            console2.log("Failed to redeem tokens:", reason);
+            vm.stopBroadcast();
+            return;
+        }
+
+        vm.stopBroadcast();
+
+        // Check balances after redemption
+        uint256 collateralAfter = IERC20(deployed.collateralToken).balanceOf(deployer);
+        uint256 collateralReceived = collateralAfter - collateralBefore;
+        uint256 expectedPayout = redeemAmount - (redeemAmount * 2 / 100); // 98%
+
+        console2.log("Collateral received:", collateralReceived);
+        console2.log("Expected payout (98%):", expectedPayout);
+        console2.log("Fee collected (2%):", redeemAmount - collateralReceived);
+
+        console2.log("\n[RESULT] Redemption completed successfully!");
+    }
+
+    function test_WithdrawFees(uint256 privateKey) internal {
+        console2.log("\n[TEST 8] Withdrawing protocol fees...");
+        console2.log("--------------------------------------");
+
+        PredictionMarketHook hook = PredictionMarketHook(deployed.hook);
+        address deployer = vm.addr(privateKey);
+
+        // Check protocol fees
+        uint256 protocolFees = hook.protocolFees(deployed.collateralToken);
+        console2.log("Protocol fees available:", protocolFees);
+
+        if (protocolFees == 0) {
+            console2.log("No fees to withdraw");
+            console2.log("\n[RESULT] Test skipped - no fees available");
+            return;
+        }
+
+        uint256 balanceBefore = IERC20(deployed.collateralToken).balanceOf(deployer);
+
+        vm.startBroadcast(privateKey);
+
+        try hook.withdrawFees(deployed.collateralToken, deployer, protocolFees) {
+            console2.log("Fees withdrawn successfully");
+        } catch Error(string memory reason) {
+            console2.log("Failed to withdraw fees:", reason);
+            vm.stopBroadcast();
+            return;
+        }
+
+        vm.stopBroadcast();
+
+        uint256 balanceAfter = IERC20(deployed.collateralToken).balanceOf(deployer);
+        uint256 feesReceived = balanceAfter - balanceBefore;
+
+        console2.log("Fees received:", feesReceived);
+        console2.log("\n[RESULT] Fees withdrawn successfully!");
     }
 
     // Additional helper function to test a specific market ID

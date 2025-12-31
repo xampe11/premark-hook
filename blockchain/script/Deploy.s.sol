@@ -68,9 +68,13 @@ contract DeployPredictionMarket is Script {
         require(address(tokenManager) == predictedTokenManager, "TokenManager address prediction failed");
 
         // Deploy PredictionMarketHook using CREATE2 with the mined salt
-        PredictionMarketHook hook = new PredictionMarketHook{salt: salt}(IPoolManager(poolManager), address(tokenManager));
+        PredictionMarketHook hook = new PredictionMarketHook{salt: salt}(IPoolManager(poolManager));
         require(address(hook) == hookAddress, "Hook address mismatch");
         console2.log("Hook deployed at:", address(hook));
+
+        // Initialize the hook
+        hook.initialize(address(tokenManager), msg.sender);
+        console2.log("Hook initialized with owner:", msg.sender);
 
         vm.stopBroadcast();
 
